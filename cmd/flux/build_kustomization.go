@@ -21,10 +21,12 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/fluxcd/pkg/ssa"
 	"github.com/spf13/cobra"
 
-	"github.com/fluxcd/flux2/internal/build"
-	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
+
+	"github.com/fluxcd/flux2/v2/internal/build"
 )
 
 var buildKsCmd = &cobra.Command{
@@ -44,7 +46,14 @@ flux build kustomization my-app --path ./path/to/local/manifests --kustomization
 
 # Build in dry-run mode without connecting to the cluster.
 # Note that variable substitutions from Secrets and ConfigMaps are skipped in dry-run mode.
-flux build kustomization my-app --path ./path/to/local/manifests --kustomization-file ./path/to/local/my-app.yaml --dry-run`,
+flux build kustomization my-app --path ./path/to/local/manifests \
+	--kustomization-file ./path/to/local/my-app.yaml \
+	--dry-run
+
+# Exclude files by providing a comma separated list of entries that follow the .gitignore pattern fromat.
+flux build kustomization my-app --path ./path/to/local/manifests \
+	--kustomization-file ./path/to/local/my-app.yaml \
+	--ignore-paths "/to_ignore/**/*.yaml,ignore.yaml"`,
 	ValidArgsFunction: resourceNamesCompletionFunc(kustomizev1.GroupVersion.WithKind(kustomizev1.KustomizationKind)),
 	RunE:              buildKsCmdRun,
 }
@@ -52,6 +61,7 @@ flux build kustomization my-app --path ./path/to/local/manifests --kustomization
 type buildKsFlags struct {
 	kustomizationFile string
 	path              string
+	ignorePaths       []string
 	dryRun            bool
 }
 
@@ -60,6 +70,7 @@ var buildKsArgs buildKsFlags
 func init() {
 	buildKsCmd.Flags().StringVar(&buildKsArgs.path, "path", "", "Path to the manifests location.")
 	buildKsCmd.Flags().StringVar(&buildKsArgs.kustomizationFile, "kustomization-file", "", "Path to the Flux Kustomization YAML file.")
+	buildKsCmd.Flags().StringSliceVar(&buildKsArgs.ignorePaths, "ignore-paths", nil, "set paths to ignore in .gitignore format")
 	buildKsCmd.Flags().BoolVar(&buildKsArgs.dryRun, "dry-run", false, "Dry run mode.")
 	buildCmd.AddCommand(buildKsCmd)
 }
@@ -88,12 +99,24 @@ func buildKsCmdRun(cmd *cobra.Command, args []string) (err error) {
 		}
 	}
 
-	builder, err := build.NewBuilder(name, buildKsArgs.path,
-		build.WithClientConfig(kubeconfigArgs, kubeclientOptions),
-		build.WithTimeout(rootArgs.timeout),
-		build.WithKustomizationFile(buildKsArgs.kustomizationFile),
-		build.WithDryRun(buildKsArgs.dryRun),
-	)
+	var builder *build.Builder
+	if buildKsArgs.dryRun {
+		builder, err = build.NewBuilder(name, buildKsArgs.path,
+			build.WithTimeout(rootArgs.timeout),
+			build.WithKustomizationFile(buildKsArgs.kustomizationFile),
+			build.WithDryRun(buildKsArgs.dryRun),
+			build.WithNamespace(*kubeconfigArgs.Namespace),
+			build.WithIgnore(buildKsArgs.ignorePaths),
+		)
+	} else {
+		builder, err = build.NewBuilder(name, buildKsArgs.path,
+			build.WithClientConfig(kubeconfigArgs, kubeclientOptions),
+			build.WithTimeout(rootArgs.timeout),
+			build.WithKustomizationFile(buildKsArgs.kustomizationFile),
+			build.WithIgnore(buildKsArgs.ignorePaths),
+		)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -104,12 +127,17 @@ func buildKsCmdRun(cmd *cobra.Command, args []string) (err error) {
 
 	errChan := make(chan error)
 	go func() {
-		manifests, err := builder.Build()
+		objects, err := builder.Build()
 		if err != nil {
 			errChan <- err
 		}
 
-		cmd.Print(string(manifests))
+		manifests, err := ssa.ObjectsToYAML(objects)
+		if err != nil {
+			errChan <- err
+		}
+
+		cmd.Print(manifests)
 		errChan <- nil
 	}()
 

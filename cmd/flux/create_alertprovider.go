@@ -28,16 +28,16 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	notificationv1 "github.com/fluxcd/notification-controller/api/v1beta1"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1beta2"
 	"github.com/fluxcd/pkg/apis/meta"
 
-	"github.com/fluxcd/flux2/internal/utils"
+	"github.com/fluxcd/flux2/v2/internal/utils"
 )
 
 var createAlertProviderCmd = &cobra.Command{
 	Use:   "alert-provider [name]",
 	Short: "Create or update a Provider resource",
-	Long:  "The create alert-provider command generates a Provider resource.",
+	Long:  withPreviewNote(`The create alert-provider command generates a Provider resource.`),
 	Example: `  # Create a Provider for a Slack channel
   flux create alert-provider slack \
   --type slack \

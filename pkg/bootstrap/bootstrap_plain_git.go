@@ -18,6 +18,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,17 +37,17 @@ import (
 	"sigs.k8s.io/kustomize/api/konfig"
 	"sigs.k8s.io/yaml"
 
-	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
 	"github.com/fluxcd/pkg/kustomize/filesys"
 	runclient "github.com/fluxcd/pkg/runtime/client"
 
-	"github.com/fluxcd/flux2/internal/utils"
-	"github.com/fluxcd/flux2/pkg/log"
-	"github.com/fluxcd/flux2/pkg/manifestgen/install"
-	"github.com/fluxcd/flux2/pkg/manifestgen/kustomization"
-	"github.com/fluxcd/flux2/pkg/manifestgen/sourcesecret"
-	"github.com/fluxcd/flux2/pkg/manifestgen/sync"
-	"github.com/fluxcd/flux2/pkg/status"
+	"github.com/fluxcd/flux2/v2/internal/utils"
+	"github.com/fluxcd/flux2/v2/pkg/log"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/install"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/kustomization"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/sourcesecret"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/sync"
+	"github.com/fluxcd/flux2/v2/pkg/status"
 	"github.com/fluxcd/pkg/git"
 	"github.com/fluxcd/pkg/git/repository"
 )
@@ -117,6 +118,10 @@ func (b *PlainGitBootstrapper) ReconcileComponents(ctx context.Context, manifest
 		b.logger.Actionf("cloning branch %q from Git repository %q", b.branch, b.url)
 		var cloned bool
 		if err = retry(1, 2*time.Second, func() (err error) {
+			if err = b.cleanGitRepoDir(); err != nil {
+				b.logger.Warningf(" failed to clean directory for git repo: %w", err)
+				return
+			}
 			_, err = b.gitClient.Clone(ctx, b.url, repository.CloneOptions{
 				CheckoutStrategy: repository.CheckoutStrategy{
 					Branch: b.branch,
@@ -258,11 +263,18 @@ func (b *PlainGitBootstrapper) ReconcileSyncConfig(ctx context.Context, options 
 			b.logger.Actionf("cloning branch %q from Git repository %q", b.branch, b.url)
 			var cloned bool
 			if err = retry(1, 2*time.Second, func() (err error) {
+				if err = b.cleanGitRepoDir(); err != nil {
+					b.logger.Warningf(" failed to clean directory for git repo: %w", err)
+					return
+				}
 				_, err = b.gitClient.Clone(ctx, b.url, repository.CloneOptions{
 					CheckoutStrategy: repository.CheckoutStrategy{
 						Branch: b.branch,
 					},
 				})
+				if err != nil {
+					b.logger.Warningf(" clone failure: %s", err)
+				}
 				if err == nil {
 					cloned = true
 				}
@@ -342,11 +354,18 @@ func (b *PlainGitBootstrapper) ReconcileSyncConfig(ctx context.Context, options 
 					return fmt.Errorf("failed to recreate tmp dir: %w", err)
 				}
 				if err = retry(1, 2*time.Second, func() (err error) {
+					if err = b.cleanGitRepoDir(); err != nil {
+						b.logger.Warningf(" failed to clean directory for git repo: %w", err)
+						return
+					}
 					_, err = b.gitClient.Clone(ctx, b.url, repository.CloneOptions{
 						CheckoutStrategy: repository.CheckoutStrategy{
 							Branch: b.branch,
 						},
 					})
+					if err != nil {
+						b.logger.Warningf(" clone failure: %s", err)
+					}
 					return
 				}); err != nil {
 					return fmt.Errorf("failed to clone repository: %w", err)
@@ -380,7 +399,7 @@ func (b *PlainGitBootstrapper) ReportKustomizationHealth(ctx context.Context, op
 
 	b.logger.Waitingf("waiting for Kustomization %q to be reconciled", objKey.String())
 
-	expectRevision := fmt.Sprintf("%s/%s", options.Branch, head)
+	expectRevision := fmt.Sprintf("%s@%s", options.Branch, git.Hash(head).Digest())
 	var k kustomizev1.Kustomization
 	if err := wait.PollImmediate(pollInterval, timeout, kustomizationReconciled(
 		ctx, b.kube, objKey, &k, expectRevision),
@@ -422,6 +441,21 @@ func (b *PlainGitBootstrapper) ReportComponentsHealth(ctx context.Context, insta
 	}
 	b.logger.Successf("all components are healthy")
 	return nil
+}
+
+// cleanGitRepoDir cleans the directory meant for the Git repo.
+func (b *PlainGitBootstrapper) cleanGitRepoDir() error {
+	dirs, err := os.ReadDir(b.gitClient.Path())
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, dir := range dirs {
+		if err := os.RemoveAll(filepath.Join(b.gitClient.Path(), dir.Name())); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func getOpenPgpEntity(keyRing openpgp.EntityList, passphrase, keyID string) (*openpgp.Entity, error) {

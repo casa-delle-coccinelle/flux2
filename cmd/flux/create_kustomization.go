@@ -31,18 +31,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2beta1"
-	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
 	"github.com/fluxcd/pkg/apis/meta"
 
-	"github.com/fluxcd/flux2/internal/flags"
-	"github.com/fluxcd/flux2/internal/utils"
+	"github.com/fluxcd/flux2/v2/internal/flags"
+	"github.com/fluxcd/flux2/v2/internal/utils"
 )
 
 var createKsCmd = &cobra.Command{
 	Use:     "kustomization [name]",
 	Aliases: []string{"ks"},
 	Short:   "Create or update a Kustomization resource",
-	Long:    "The create command generates a Kustomization resource for a given source.",
+	Long:    `The create command generates a Kustomization resource for a given source.`,
 	Example: `  # Create a Kustomization resource from a source at a given path
   flux create kustomization kyverno \
     --source=GitRepository/kyverno \
@@ -97,6 +97,7 @@ type kustomizationFlags struct {
 	targetNamespace     string
 	wait                bool
 	kubeConfigSecretRef string
+	retryInterval       time.Duration
 }
 
 var kustomizationArgs = NewKustomizationFlags()
@@ -116,6 +117,7 @@ func init() {
 	createKsCmd.Flags().StringVar(&kustomizationArgs.targetNamespace, "target-namespace", "", "overrides the namespace of all Kustomization objects reconciled by this Kustomization")
 	createKsCmd.Flags().StringVar(&kustomizationArgs.kubeConfigSecretRef, "kubeconfig-secret-ref", "", "the name of the Kubernetes Secret that contains a key with the kubeconfig file for connecting to a remote cluster")
 	createKsCmd.Flags().MarkDeprecated("validation", "this arg is no longer used, all resources are validated using server-side apply dry-run")
+	createKsCmd.Flags().DurationVar(&kustomizationArgs.retryInterval, "retry-interval", 0, "the interval at which to retry a previously failed reconciliation")
 
 	createCmd.AddCommand(createKsCmd)
 }
@@ -236,6 +238,10 @@ func createKsCmdRun(cmd *cobra.Command, args []string) error {
 		if kustomizationArgs.decryptionSecret != "" {
 			kustomization.Spec.Decryption.SecretRef = &meta.LocalObjectReference{Name: kustomizationArgs.decryptionSecret}
 		}
+	}
+
+	if kustomizationArgs.retryInterval > 0 {
+		kustomization.Spec.RetryInterval = &metav1.Duration{Duration: kustomizationArgs.retryInterval}
 	}
 
 	if createArgs.export {

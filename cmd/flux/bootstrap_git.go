@@ -28,44 +28,44 @@ import (
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/fluxcd/flux2/internal/flags"
-	"github.com/fluxcd/flux2/internal/utils"
-	"github.com/fluxcd/flux2/pkg/bootstrap"
-	"github.com/fluxcd/flux2/pkg/manifestgen"
-	"github.com/fluxcd/flux2/pkg/manifestgen/install"
-	"github.com/fluxcd/flux2/pkg/manifestgen/sourcesecret"
-	"github.com/fluxcd/flux2/pkg/manifestgen/sync"
+	"github.com/fluxcd/flux2/v2/internal/flags"
+	"github.com/fluxcd/flux2/v2/internal/utils"
+	"github.com/fluxcd/flux2/v2/pkg/bootstrap"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/install"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/sourcesecret"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/sync"
 	"github.com/fluxcd/pkg/git"
 	"github.com/fluxcd/pkg/git/gogit"
 )
 
 var bootstrapGitCmd = &cobra.Command{
 	Use:   "git",
-	Short: "Bootstrap toolkit components in a Git repository",
-	Long: `The bootstrap git command commits the toolkit components manifests to the
-branch of a Git repository. It then configures the target cluster to synchronize with
-the repository. If the toolkit components are present on the cluster, the bootstrap
+	Short: "Deploy Flux on a cluster connected to a Git repository",
+	Long: `The bootstrap git command commits the Flux manifests to the
+branch of a Git repository. And then it configures the target cluster to synchronize with
+that repository. If the Flux components are present on the cluster, the bootstrap
 command will perform an upgrade if needed.`,
 	Example: `  # Run bootstrap for a Git repository and authenticate with your SSH agent
-  flux bootstrap git --url=ssh://git@example.com/repository.git
+  flux bootstrap git --url=ssh://git@example.com/repository.git --path=clusters/my-cluster
 
   # Run bootstrap for a Git repository and authenticate using a password
-  flux bootstrap git --url=https://example.com/repository.git --password=<password>
+  flux bootstrap git --url=https://example.com/repository.git --password=<password> --path=clusters/my-cluster
 
   # Run bootstrap for a Git repository and authenticate using a password from environment variable
-  GIT_PASSWORD=<password> && flux bootstrap git --url=https://example.com/repository.git
+  GIT_PASSWORD=<password> && flux bootstrap git --url=https://example.com/repository.git --path=clusters/my-cluster
 
   # Run bootstrap for a Git repository with a passwordless private key
-  flux bootstrap git --url=ssh://git@example.com/repository.git --private-key-file=<path/to/private.key>
+  flux bootstrap git --url=ssh://git@example.com/repository.git --private-key-file=<path/to/private.key> --path=clusters/my-cluster
 
   # Run bootstrap for a Git repository with a private key and password
-  flux bootstrap git --url=ssh://git@example.com/repository.git --private-key-file=<path/to/private.key> --password=<password>
+  flux bootstrap git --url=ssh://git@example.com/repository.git --private-key-file=<path/to/private.key> --password=<password> --path=clusters/my-cluster
 
   # Run bootstrap for a Git repository on AWS CodeCommit
-  flux bootstrap git --url=ssh://<SSH-Key-ID>@git-codecommit.<region>.amazonaws.com/v1/repos/<repository> --private-key-file=<path/to/private.key> --password=<SSH-passphrase>
+  flux bootstrap git --url=ssh://<SSH-Key-ID>@git-codecommit.<region>.amazonaws.com/v1/repos/<repository> --private-key-file=<path/to/private.key> --password=<SSH-passphrase> --path=clusters/my-cluster
 
   # Run bootstrap for a Git repository on Azure Devops
-  flux bootstrap git --url=ssh://git@ssh.dev.azure.com/v3/<org>/<project>/<repository> --ssh-key-algorithm=rsa --ssh-rsa-bits=4096
+  flux bootstrap git --url=ssh://git@ssh.dev.azure.com/v3/<org>/<project>/<repository> --ssh-key-algorithm=rsa --ssh-rsa-bits=4096 --path=clusters/my-cluster
 `,
 	RunE: bootstrapGitCmdRun,
 }
@@ -93,7 +93,7 @@ func init() {
 	bootstrapGitCmd.Flags().StringVarP(&gitArgs.username, "username", "u", "git", "basic authentication username")
 	bootstrapGitCmd.Flags().StringVarP(&gitArgs.password, "password", "p", "", "basic authentication password")
 	bootstrapGitCmd.Flags().BoolVarP(&gitArgs.silent, "silent", "s", false, "assumes the deploy key is already setup, skips confirmation")
-	bootstrapGitCmd.Flags().BoolVar(&gitArgs.insecureHttpAllowed, "allow-insecure-http", false, "allows http git url connections")
+	bootstrapGitCmd.Flags().BoolVar(&gitArgs.insecureHttpAllowed, "allow-insecure-http", false, "allows insecure HTTP connections")
 
 	bootstrapCmd.AddCommand(bootstrapGitCmd)
 }
@@ -178,7 +178,7 @@ func bootstrapGitCmdRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create authentication options for %s: %w", repositoryURL.String(), err)
 	}
 
-	clientOpts := []gogit.ClientOption{gogit.WithDiskStorage()}
+	clientOpts := []gogit.ClientOption{gogit.WithDiskStorage(), gogit.WithFallbackToDefaultKnownHosts()}
 	if gitArgs.insecureHttpAllowed {
 		clientOpts = append(clientOpts, gogit.WithInsecureCredentialsOverHTTP())
 	}
@@ -271,7 +271,6 @@ func bootstrapGitCmdRun(cmd *cobra.Command, args []string) error {
 		Secret:            bootstrapArgs.secretName,
 		TargetPath:        gitArgs.path.ToSlash(),
 		ManifestFile:      sync.MakeDefaultOptions().ManifestFile,
-		GitImplementation: sourceGitArgs.gitImplementation.String(),
 		RecurseSubmodules: bootstrapArgs.recurseSubmodules,
 	}
 
@@ -325,6 +324,11 @@ func getAuthOpts(u *url.URL, caBundle []byte) (*git.AuthOptions, error) {
 			CAFile:    caBundle,
 		}, nil
 	case "ssh":
+		authOpts := &git.AuthOptions{
+			Transport: git.SSH,
+			Username:  u.User.Username(),
+			Password:  gitArgs.password,
+		}
 		if bootstrapArgs.privateKeyFile != "" {
 			pk, err := os.ReadFile(bootstrapArgs.privateKeyFile)
 			if err != nil {
@@ -334,15 +338,10 @@ func getAuthOpts(u *url.URL, caBundle []byte) (*git.AuthOptions, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &git.AuthOptions{
-				Transport:  git.SSH,
-				Username:   u.User.Username(),
-				Password:   gitArgs.password,
-				Identity:   pk,
-				KnownHosts: kh,
-			}, nil
+			authOpts.Identity = pk
+			authOpts.KnownHosts = kh
 		}
-		return nil, nil
+		return authOpts, nil
 	default:
 		return nil, fmt.Errorf("scheme %q is not supported", u.Scheme)
 	}

@@ -19,13 +19,13 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	notificationv1 "github.com/fluxcd/notification-controller/api/v1beta1"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1beta2"
 )
 
 var suspendAlertCmd = &cobra.Command{
 	Use:   "alert [name]",
 	Short: "Suspend reconciliation of Alert",
-	Long:  "The suspend command disables the reconciliation of a Alert resource.",
+	Long:  `The suspend command disables the reconciliation of a Alert resource.`,
 	Example: `  # Suspend reconciliation for an existing Alert
   flux suspend alert main`,
 	ValidArgsFunction: resourceNamesCompletionFunc(notificationv1.GroupVersion.WithKind(notificationv1.AlertKind)),

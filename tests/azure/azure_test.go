@@ -31,7 +31,7 @@ import (
 	"time"
 
 	eventhub "github.com/Azure/azure-event-hubs-go/v3"
-	"github.com/hashicorp/hc-install"
+	install "github.com/hashicorp/hc-install"
 	"github.com/hashicorp/hc-install/fs"
 	"github.com/hashicorp/hc-install/product"
 	"github.com/hashicorp/hc-install/src"
@@ -50,12 +50,13 @@ import (
 	extgogit "github.com/fluxcd/go-git/v5"
 	"github.com/fluxcd/go-git/v5/plumbing"
 	automationv1beta1 "github.com/fluxcd/image-automation-controller/api/v1beta1"
-	reflectorv1beta1 "github.com/fluxcd/image-reflector-controller/api/v1beta1"
-	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
-	notiv1beta1 "github.com/fluxcd/notification-controller/api/v1beta1"
+	reflectorv1beta2 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
+	notiv1 "github.com/fluxcd/notification-controller/api/v1"
+	notiv1beta2 "github.com/fluxcd/notification-controller/api/v1beta2"
 	eventv1 "github.com/fluxcd/pkg/apis/event/v1beta1"
 	"github.com/fluxcd/pkg/apis/meta"
-	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 )
 
 const (
@@ -283,7 +284,7 @@ func TestAzureDevOpsCloning(t *testing.T) {
         name: foobar
         namespace: %s
     `, tt.name)
-		name := fmt.Sprintf("./cloning-test/%s/configmap.yaml", tt.name)
+		name := fmt.Sprintf("cloning-test/%s/configmap.yaml", tt.name)
 		files[name] = strings.NewReader(manifest)
 	}
 
@@ -441,14 +442,14 @@ func TestImageRepositoryACR(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	imageRepository := reflectorv1beta1.ImageRepository{
+	imageRepository := reflectorv1beta2.ImageRepository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "podinfo",
 			Namespace: name,
 		},
 	}
 	_, err = controllerutil.CreateOrUpdate(ctx, cfg.kubeClient, &imageRepository, func() error {
-		imageRepository.Spec = reflectorv1beta1.ImageRepositorySpec{
+		imageRepository.Spec = reflectorv1beta2.ImageRepositorySpec{
 			Image: fmt.Sprintf("%s/container/podinfo", cfg.acr.url),
 			Interval: metav1.Duration{
 				Duration: 1 * time.Minute,
@@ -460,19 +461,19 @@ func TestImageRepositoryACR(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	imagePolicy := reflectorv1beta1.ImagePolicy{
+	imagePolicy := reflectorv1beta2.ImagePolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "podinfo",
 			Namespace: name,
 		},
 	}
 	_, err = controllerutil.CreateOrUpdate(ctx, cfg.kubeClient, &imagePolicy, func() error {
-		imagePolicy.Spec = reflectorv1beta1.ImagePolicySpec{
+		imagePolicy.Spec = reflectorv1beta2.ImagePolicySpec{
 			ImageRepositoryRef: meta.NamespacedObjectReference{
 				Name: imageRepository.Name,
 			},
-			Policy: reflectorv1beta1.ImagePolicyChoice{
-				SemVer: &reflectorv1beta1.SemVerPolicy{
+			Policy: reflectorv1beta2.ImagePolicyChoice{
+				SemVer: &reflectorv1beta2.SemVerPolicy{
 					Range: "1.0.x",
 				},
 			},
@@ -554,7 +555,7 @@ stringData:
 	require.NoError(t, err)
 
 	files := make(map[string]io.Reader)
-	files["./key-vault-sops/secret.enc.yaml"] = r
+	files["key-vault-sops/secret.enc.yaml"] = r
 	err = commitAndPushAll(repo, files, name)
 	require.NoError(t, err)
 
@@ -678,14 +679,14 @@ func TestAzureDevOpsCommitStatus(t *testing.T) {
 		}
 		return nil
 	})
-	provider := notiv1beta1.Provider{
+	provider := notiv1beta2.Provider{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "azuredevops",
 			Namespace: name,
 		},
 	}
 	_, err = controllerutil.CreateOrUpdate(ctx, cfg.kubeClient, &provider, func() error {
-		provider.Spec = notiv1beta1.ProviderSpec{
+		provider.Spec = notiv1beta2.ProviderSpec{
 			Type:    "azuredevops",
 			Address: repoUrl,
 			SecretRef: &meta.LocalObjectReference{
@@ -695,18 +696,18 @@ func TestAzureDevOpsCommitStatus(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	alert := notiv1beta1.Alert{
+	alert := notiv1beta2.Alert{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "azuredevops",
 			Namespace: name,
 		},
 	}
 	_, err = controllerutil.CreateOrUpdate(ctx, cfg.kubeClient, &alert, func() error {
-		alert.Spec = notiv1beta1.AlertSpec{
+		alert.Spec = notiv1beta2.AlertSpec{
 			ProviderRef: meta.LocalObjectReference{
 				Name: provider.Name,
 			},
-			EventSources: []notiv1beta1.CrossNamespaceObjectReference{
+			EventSources: []notiv1.CrossNamespaceObjectReference{
 				{
 					Kind:      "Kustomization",
 					Name:      name,
@@ -806,14 +807,14 @@ func TestEventHubNotification(t *testing.T) {
 		}
 		return nil
 	})
-	provider := notiv1beta1.Provider{
+	provider := notiv1beta2.Provider{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: name,
 		},
 	}
 	_, err = controllerutil.CreateOrUpdate(ctx, cfg.kubeClient, &provider, func() error {
-		provider.Spec = notiv1beta1.ProviderSpec{
+		provider.Spec = notiv1beta2.ProviderSpec{
 			Type:    "azureeventhub",
 			Address: repoUrl,
 			SecretRef: &meta.LocalObjectReference{
@@ -823,18 +824,18 @@ func TestEventHubNotification(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	alert := notiv1beta1.Alert{
+	alert := notiv1beta2.Alert{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: name,
 		},
 	}
 	_, err = controllerutil.CreateOrUpdate(ctx, cfg.kubeClient, &alert, func() error {
-		alert.Spec = notiv1beta1.AlertSpec{
+		alert.Spec = notiv1beta2.AlertSpec{
 			ProviderRef: meta.LocalObjectReference{
 				Name: provider.Name,
 			},
-			EventSources: []notiv1beta1.CrossNamespaceObjectReference{
+			EventSources: []notiv1.CrossNamespaceObjectReference{
 				{
 					Kind:      "Kustomization",
 					Name:      name,

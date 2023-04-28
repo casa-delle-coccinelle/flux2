@@ -35,6 +35,20 @@ You can download a specific version with:
           version: 0.32.0
 ```
 
+You can also authenticate against the GitHub API using GitHub Actions' `GITHUB_TOKEN` secret.
+
+For more information, please [read about the GitHub token secret](https://docs.github.com/en/actions/security-guides/automatic-token-authentication#about-the-github_token-secret).
+
+```yaml
+    steps:
+      - name: Setup Flux CLI
+        uses: fluxcd/flux2/action@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+This is useful if you are seeing failures on shared runners, those failures are usually API limits being hit.
+
 ### Automate Flux updates
 
 Example workflow for updating Flux's components generated with `flux bootstrap --path=clusters/production`:
@@ -47,12 +61,16 @@ on:
   schedule:
     - cron: "0 * * * *"
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   components:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Setup Flux CLI
         uses: fluxcd/flux2/action@main
       - name: Check for updates
@@ -62,9 +80,9 @@ jobs:
             --export > ./clusters/production/flux-system/gotk-components.yaml
 
           VERSION="$(flux -v)"
-          echo "::set-output name=flux_version::$VERSION"
+          echo "flux_version=$VERSION" >> $GITHUB_OUTPUT
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v3
+        uses: peter-evans/create-pull-request@v4
         with:
             token: ${{ secrets.GITHUB_TOKEN }}
             branch: update-flux
@@ -114,24 +132,31 @@ jobs:
           flux push artifact $OCI_REPO:$(git rev-parse --short HEAD) \
             --path="./deploy" \
             --source="$(git config --get remote.origin.url)" \
-            --revision="$(git branch --show-current)/$(git rev-parse HEAD)"
+            --revision="$(git branch --show-current)@sha1:$(git rev-parse HEAD)"
       - name: Deploy manifests to staging
         run: |
           flux tag artifact $OCI_REPO:$(git rev-parse --short HEAD) --tag staging
 ```
 
-Example workflow for publishing Kubernetes manifests bundled as OCI artifacts to Docker Hub:
+### Push and sign Kubernetes manifests to container registries
+
+Example workflow for publishing Kubernetes manifests bundled as OCI artifacts
+which are signed with Cosign and GitHub OIDC:
 
 ```yaml
-name: push-artifact-production
+name: push-sign-artifact
 
 on:
   push:
-    tags:
-      - '*'
+    branches:
+      - 'main'
+
+permissions:
+  packages: write # needed for ghcr.io access
+  id-token: write # needed for keyless signing
 
 env:
-  OCI_REPO: "oci://docker.io/my-org/app-config"
+  OCI_REPO: "oci://ghcr.io/my-org/manifests/${{ github.event.repository.name }}"
 
 jobs:
   kubernetes:
@@ -141,23 +166,24 @@ jobs:
         uses: actions/checkout@v3
       - name: Setup Flux CLI
         uses: fluxcd/flux2/action@main
-      - name: Login to Docker Hub
+      - name: Setup Cosign
+        uses: sigstore/cosign-installer@main
+      - name: Login to GHCR
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Generate manifests
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push and sign manifests
         run: |
-          kustomize build ./manifests/production > ./deploy/app.yaml
-      - name: Push manifests
-        run: |
-          flux push artifact $OCI_REPO:$(git tag --points-at HEAD) \
-            --path="./deploy" \
-            --source="$(git config --get remote.origin.url)" \
-            --revision="$(git tag --points-at HEAD)/$(git rev-parse HEAD)"
-      - name: Deploy manifests to production
-        run: |
-          flux tag artifact $OCI_REPO:$(git tag --points-at HEAD) --tag production
+          digest_url=$(flux push artifact \
+          $OCI_REPO:$(git rev-parse --short HEAD) \
+          --path="./manifests" \
+          --source="$(git config --get remote.origin.url)" \
+          --revision="$(git branch --show-current)@sha1:$(git rev-parse HEAD)" |\
+          jq -r '. | .repository + "@" + .digest')
+
+          cosign sign $digest_url
 ```
 
 ### End-to-end testing
@@ -177,7 +203,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Setup Flux CLI
         uses: fluxcd/flux2/action@main
       - name: Setup Kubernetes Kind

@@ -28,23 +28,23 @@ import (
 	"github.com/fluxcd/pkg/git/gogit"
 	"github.com/spf13/cobra"
 
-	"github.com/fluxcd/flux2/internal/flags"
-	"github.com/fluxcd/flux2/internal/utils"
-	"github.com/fluxcd/flux2/pkg/bootstrap"
-	"github.com/fluxcd/flux2/pkg/bootstrap/provider"
-	"github.com/fluxcd/flux2/pkg/manifestgen"
-	"github.com/fluxcd/flux2/pkg/manifestgen/install"
-	"github.com/fluxcd/flux2/pkg/manifestgen/sourcesecret"
-	"github.com/fluxcd/flux2/pkg/manifestgen/sync"
+	"github.com/fluxcd/flux2/v2/internal/flags"
+	"github.com/fluxcd/flux2/v2/internal/utils"
+	"github.com/fluxcd/flux2/v2/pkg/bootstrap"
+	"github.com/fluxcd/flux2/v2/pkg/bootstrap/provider"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/install"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/sourcesecret"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/sync"
 )
 
 var bootstrapGitLabCmd = &cobra.Command{
 	Use:   "gitlab",
-	Short: "Bootstrap toolkit components in a GitLab repository",
+	Short: "Deploy Flux on a cluster connected to a GitLab repository",
 	Long: `The bootstrap gitlab command creates the GitLab repository if it doesn't exists and
-commits the toolkit components manifests to the master branch.
-Then it configures the target cluster to synchronize with the repository.
-If the toolkit components are present on the cluster,
+commits the Flux manifests to the specified branch.
+Then it configures the target cluster to synchronize with that repository.
+If the Flux components are present on the cluster,
 the bootstrap command will perform an upgrade if needed.`,
 	Example: `  # Create a GitLab API token and export it as an env var
   export GITLAB_TOKEN=<my-token>
@@ -65,7 +65,11 @@ the bootstrap command will perform an upgrade if needed.`,
   flux bootstrap gitlab --owner=<group> --repository=<repository name> --hostname=<domain> --token-auth
 
   # Run bootstrap for a an existing repository with a branch named main
-  flux bootstrap gitlab --owner=<organization> --repository=<repository name> --branch=main --token-auth`,
+  flux bootstrap gitlab --owner=<organization> --repository=<repository name> --branch=main --token-auth
+
+  # Run bootstrap for a private repository using Deploy Token authentication
+  flux bootstrap gitlab --owner=<group> --repository=<repository name> --deploy-token-auth
+  `,
 	RunE: bootstrapGitLabCmdRun,
 }
 
@@ -77,16 +81,17 @@ const (
 )
 
 type gitlabFlags struct {
-	owner        string
-	repository   string
-	interval     time.Duration
-	personal     bool
-	private      bool
-	hostname     string
-	path         flags.SafeRelativePath
-	teams        []string
-	readWriteKey bool
-	reconcile    bool
+	owner           string
+	repository      string
+	interval        time.Duration
+	personal        bool
+	private         bool
+	hostname        string
+	path            flags.SafeRelativePath
+	teams           []string
+	readWriteKey    bool
+	reconcile       bool
+	deployTokenAuth bool
 }
 
 var gitlabArgs gitlabFlags
@@ -102,6 +107,7 @@ func init() {
 	bootstrapGitLabCmd.Flags().Var(&gitlabArgs.path, "path", "path relative to the repository root, when specified the cluster sync will be scoped to this path")
 	bootstrapGitLabCmd.Flags().BoolVar(&gitlabArgs.readWriteKey, "read-write-key", false, "if true, the deploy key is configured with read/write permissions")
 	bootstrapGitLabCmd.Flags().BoolVar(&gitlabArgs.reconcile, "reconcile", false, "if true, the configured options are also reconciled if the repository already exists")
+	bootstrapGitLabCmd.Flags().BoolVar(&gitlabArgs.deployTokenAuth, "deploy-token-auth", false, "when enabled, a Project Deploy Token is generated and will be used instead of the SSH deploy token")
 
 	bootstrapCmd.AddCommand(bootstrapGitLabCmd)
 }
@@ -121,6 +127,10 @@ func bootstrapGitLabCmdRun(cmd *cobra.Command, args []string) error {
 			err = fmt.Errorf("%s is an invalid project name for gitlab.\nIt can contain only letters, digits, emojis, '_', '.', dash, space. It must start with letter, digit, emoji or '_'.", gitlabArgs.repository)
 		}
 		return err
+	}
+
+	if bootstrapArgs.tokenAuth && gitlabArgs.deployTokenAuth {
+		return fmt.Errorf("--token-auth and --deploy-token-auth cannot be set both.")
 	}
 
 	if err := bootstrapValidate(); err != nil {
@@ -181,14 +191,15 @@ func bootstrapGitLabCmdRun(cmd *cobra.Command, args []string) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	clientOpts := []gogit.ClientOption{gogit.WithDiskStorage(), gogit.WithFallbackToDefaultKnownHosts()}
 	gitClient, err := gogit.NewClient(tmpDir, &git.AuthOptions{
 		Transport: git.HTTPS,
 		Username:  gitlabArgs.owner,
 		Password:  glToken,
 		CAFile:    caBundle,
-	})
+	}, clientOpts...)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create a Git client: %w", err)
 	}
 
 	// Install manifest config
@@ -224,6 +235,9 @@ func bootstrapGitLabCmdRun(cmd *cobra.Command, args []string) error {
 		secretOpts.Username = "git"
 		secretOpts.Password = glToken
 		secretOpts.CAFile = caBundle
+	} else if gitlabArgs.deployTokenAuth {
+		// the actual deploy token will be reconciled later
+		secretOpts.CAFile = caBundle
 	} else {
 		keypair, err := sourcesecret.LoadKeyPairFromPath(bootstrapArgs.privateKeyFile, gitArgs.password)
 		if err != nil {
@@ -249,7 +263,6 @@ func bootstrapGitLabCmdRun(cmd *cobra.Command, args []string) error {
 		Secret:            bootstrapArgs.secretName,
 		TargetPath:        gitlabArgs.path.ToSlash(),
 		ManifestFile:      sync.MakeDefaultOptions().ManifestFile,
-		GitImplementation: sourceGitArgs.gitImplementation.String(),
 		RecurseSubmodules: bootstrapArgs.recurseSubmodules,
 	}
 
@@ -274,8 +287,11 @@ func bootstrapGitLabCmdRun(cmd *cobra.Command, args []string) error {
 	if bootstrapArgs.sshHostname != "" {
 		bootstrapOpts = append(bootstrapOpts, bootstrap.WithSSHHostname(bootstrapArgs.sshHostname))
 	}
-	if bootstrapArgs.tokenAuth {
+	if bootstrapArgs.tokenAuth || gitlabArgs.deployTokenAuth {
 		bootstrapOpts = append(bootstrapOpts, bootstrap.WithSyncTransportType("https"))
+	}
+	if gitlabArgs.deployTokenAuth {
+		bootstrapOpts = append(bootstrapOpts, bootstrap.WithDeployTokenAuth())
 	}
 	if !gitlabArgs.private {
 		bootstrapOpts = append(bootstrapOpts, bootstrap.WithProviderRepositoryConfig("", "", "public"))

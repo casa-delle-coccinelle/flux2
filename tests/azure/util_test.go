@@ -42,15 +42,16 @@ import (
 	"github.com/fluxcd/go-git/v5/plumbing/transport/http"
 	helmv2beta1 "github.com/fluxcd/helm-controller/api/v2beta1"
 	automationv1beta1 "github.com/fluxcd/image-automation-controller/api/v1beta1"
-	reflectorv1beta1 "github.com/fluxcd/image-reflector-controller/api/v1beta1"
-	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
-	notiv1beta1 "github.com/fluxcd/notification-controller/api/v1beta1"
+	reflectorv1beta2 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
+	notiv1 "github.com/fluxcd/notification-controller/api/v1"
+	notiv1beta2 "github.com/fluxcd/notification-controller/api/v1beta2"
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/git"
 	"github.com/fluxcd/pkg/git/gogit"
 	"github.com/fluxcd/pkg/git/repository"
-
-	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	sourcev1b2 "github.com/fluxcd/source-controller/api/v1beta2"
 )
 
 const defaultBranch = "main"
@@ -71,6 +72,10 @@ func getKubernetesCredentials(kubeconfig, aksHost, aksCert, aksKey, aksCa string
 			CAData:   []byte(aksCa),
 		},
 	}
+	err = sourcev1b2.AddToScheme(scheme.Scheme)
+	if err != nil {
+		return "", nil, err
+	}
 	err = sourcev1.AddToScheme(scheme.Scheme)
 	if err != nil {
 		return "", nil, err
@@ -83,7 +88,7 @@ func getKubernetesCredentials(kubeconfig, aksHost, aksCert, aksKey, aksCa string
 	if err != nil {
 		return "", nil, err
 	}
-	err = reflectorv1beta1.AddToScheme(scheme.Scheme)
+	err = reflectorv1beta2.AddToScheme(scheme.Scheme)
 	if err != nil {
 		return "", nil, err
 	}
@@ -91,7 +96,11 @@ func getKubernetesCredentials(kubeconfig, aksHost, aksCert, aksKey, aksCa string
 	if err != nil {
 		return "", nil, err
 	}
-	err = notiv1beta1.AddToScheme(scheme.Scheme)
+	err = notiv1beta2.AddToScheme(scheme.Scheme)
+	if err != nil {
+		return "", nil, err
+	}
+	err = notiv1.AddToScheme(scheme.Scheme)
 	if err != nil {
 		return "", nil, err
 	}
@@ -129,7 +138,7 @@ func installFlux(ctx context.Context, kubeClient client.Client, kubeconfigPath, 
 	//// Install Flux and push files to git repository
 	repo, _, err := getRepository(repoUrl, defaultBranch, true, azdoPat)
 	if err != nil {
-		return err
+		return fmt.Errorf("error cloning repositoriy: %w", err)
 	}
 
 	kustomizeYaml := `
@@ -168,19 +177,19 @@ patchesStrategicMerge:
 `
 
 	files := make(map[string]io.Reader)
-	files["./clusters/e2e/flux-system/kustomization.yaml"] = strings.NewReader(kustomizeYaml)
-	files["./clusters/e2e/flux-system/gotk-components.yaml"] = strings.NewReader("")
-	files["./clusters/e2e/flux-system/gotk-sync.yaml"] = strings.NewReader("")
+	files["clusters/e2e/flux-system/kustomization.yaml"] = strings.NewReader(kustomizeYaml)
+	files["clusters/e2e/flux-system/gotk-components.yaml"] = strings.NewReader("")
+	files["clusters/e2e/flux-system/gotk-sync.yaml"] = strings.NewReader("")
 	err = commitAndPushAll(repo, files, defaultBranch)
 	if err != nil {
-		return err
+		return fmt.Errorf("error commiting and pushing manifests: %w", err)
 	}
 
 	bootstrapCmd := fmt.Sprintf("flux bootstrap git  --url=%s --password=%s --kubeconfig=%s"+
 		" --token-auth --path=clusters/e2e  --components-extra image-reflector-controller,image-automation-controller",
 		repoUrl, azdoPat, kubeconfigPath)
 	if err := runCommand(context.Background(), 10*time.Minute, "./", bootstrapCmd); err != nil {
-		return err
+		return fmt.Errorf("error running bootstrap: %w", err)
 	}
 
 	return nil
@@ -251,7 +260,6 @@ func setupNamespace(ctx context.Context, kubeClient client.Client, repoUrl, pass
 			Interval: metav1.Duration{
 				Duration: 1 * time.Minute,
 			},
-			GitImplementation: sourcev1.LibGit2Implementation,
 			Reference: &sourcev1.GitRepositoryRef{
 				Branch: name,
 			},

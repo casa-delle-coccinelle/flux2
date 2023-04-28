@@ -17,7 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -30,7 +33,8 @@ import (
 var buildArtifactCmd = &cobra.Command{
 	Use:   "artifact",
 	Short: "Build artifact",
-	Long:  `The build artifact command creates a tgz file with the manifests from the given directory or a single manifest file.`,
+	Long: withPreviewNote(`The build artifact command creates a tgz file with the manifests
+from the given directory or a single manifest file.`),
 	Example: `  # Build the given manifests directory into an artifact
   flux build artifact --path ./path/to/local/manifests --output ./path/to/artifact.tgz
 
@@ -54,7 +58,7 @@ var excludeOCI = append(strings.Split(sourceignore.ExcludeVCS, ","), strings.Spl
 var buildArtifactArgs buildArtifactFlags
 
 func init() {
-	buildArtifactCmd.Flags().StringVar(&buildArtifactArgs.path, "path", "", "Path to the directory where the Kubernetes manifests are located.")
+	buildArtifactCmd.Flags().StringVarP(&buildArtifactArgs.path, "path", "p", "", "Path to the directory where the Kubernetes manifests are located.")
 	buildArtifactCmd.Flags().StringVarP(&buildArtifactArgs.output, "output", "o", "artifact.tgz", "Path to where the artifact tgz file should be written.")
 	buildArtifactCmd.Flags().StringSliceVar(&buildArtifactArgs.ignorePaths, "ignore-paths", excludeOCI, "set paths to ignore in .gitignore format")
 
@@ -66,18 +70,48 @@ func buildArtifactCmdRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid path %q", buildArtifactArgs.path)
 	}
 
-	if _, err := os.Stat(buildArtifactArgs.path); err != nil {
-		return fmt.Errorf("invalid path '%s', must point to an existing directory or file", buildArtifactArgs.path)
+	path := buildArtifactArgs.path
+	var err error
+	if buildArtifactArgs.path == "-" {
+		path, err = saveReaderToFile(os.Stdin)
+		if err != nil {
+			return err
+		}
+
+		defer os.Remove(path)
 	}
 
-	logger.Actionf("building artifact from %s", buildArtifactArgs.path)
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("invalid path '%s', must point to an existing directory or file", path)
+	}
+
+	logger.Actionf("building artifact from %s", path)
 
 	ociClient := oci.NewLocalClient()
-	if err := ociClient.Build(buildArtifactArgs.output, buildArtifactArgs.path, buildArtifactArgs.ignorePaths); err != nil {
+	if err := ociClient.Build(buildArtifactArgs.output, path, buildArtifactArgs.ignorePaths); err != nil {
 		return fmt.Errorf("bulding artifact failed, error: %w", err)
 	}
 
 	logger.Successf("artifact created at %s", buildArtifactArgs.output)
-
 	return nil
+}
+
+func saveReaderToFile(reader io.Reader) (string, error) {
+	b, err := io.ReadAll(bufio.NewReader(reader))
+	if err != nil {
+		return "", err
+	}
+	b = bytes.TrimRight(b, "\r\n")
+	f, err := os.CreateTemp("", "*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("unable to create temp dir for stdin")
+	}
+
+	defer f.Close()
+
+	if _, err := f.Write(b); err != nil {
+		return "", fmt.Errorf("error writing stdin to file: %w", err)
+	}
+
+	return f.Name(), nil
 }

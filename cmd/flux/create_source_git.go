@@ -37,11 +37,11 @@ import (
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/conditions"
 
-	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 
-	"github.com/fluxcd/flux2/internal/flags"
-	"github.com/fluxcd/flux2/internal/utils"
-	"github.com/fluxcd/flux2/pkg/manifestgen/sourcesecret"
+	"github.com/fluxcd/flux2/v2/internal/flags"
+	"github.com/fluxcd/flux2/v2/internal/utils"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/sourcesecret"
 )
 
 type sourceGitFlags struct {
@@ -49,13 +49,14 @@ type sourceGitFlags struct {
 	branch            string
 	tag               string
 	semver            string
+	refName           string
+	commit            string
 	username          string
 	password          string
 	keyAlgorithm      flags.PublicKeyAlgorithm
 	keyRSABits        flags.RSAKeyBits
 	keyECDSACurve     flags.ECDSACurve
 	secretRef         string
-	gitImplementation flags.GitImplementation
 	caFile            string
 	privateKeyFile    string
 	recurseSubmodules bool
@@ -130,13 +131,14 @@ func init() {
 	createSourceGitCmd.Flags().StringVar(&sourceGitArgs.branch, "branch", "", "git branch")
 	createSourceGitCmd.Flags().StringVar(&sourceGitArgs.tag, "tag", "", "git tag")
 	createSourceGitCmd.Flags().StringVar(&sourceGitArgs.semver, "tag-semver", "", "git tag semver range")
+	createSourceGitCmd.Flags().StringVar(&sourceGitArgs.refName, "ref-name", "", " git reference name")
+	createSourceGitCmd.Flags().StringVar(&sourceGitArgs.commit, "commit", "", "git commit")
 	createSourceGitCmd.Flags().StringVarP(&sourceGitArgs.username, "username", "u", "", "basic authentication username")
 	createSourceGitCmd.Flags().StringVarP(&sourceGitArgs.password, "password", "p", "", "basic authentication password")
 	createSourceGitCmd.Flags().Var(&sourceGitArgs.keyAlgorithm, "ssh-key-algorithm", sourceGitArgs.keyAlgorithm.Description())
 	createSourceGitCmd.Flags().Var(&sourceGitArgs.keyRSABits, "ssh-rsa-bits", sourceGitArgs.keyRSABits.Description())
 	createSourceGitCmd.Flags().Var(&sourceGitArgs.keyECDSACurve, "ssh-ecdsa-curve", sourceGitArgs.keyECDSACurve.Description())
 	createSourceGitCmd.Flags().StringVar(&sourceGitArgs.secretRef, "secret-ref", "", "the name of an existing secret containing SSH or basic credentials")
-	createSourceGitCmd.Flags().Var(&sourceGitArgs.gitImplementation, "git-implementation", sourceGitArgs.gitImplementation.Description())
 	createSourceGitCmd.Flags().StringVar(&sourceGitArgs.caFile, "ca-file", "", "path to TLS CA file used for validating self-signed certificates")
 	createSourceGitCmd.Flags().StringVar(&sourceGitArgs.privateKeyFile, "private-key-file", "", "path to a passwordless private key file used for authenticating to the Git SSH server")
 	createSourceGitCmd.Flags().BoolVar(&sourceGitArgs.recurseSubmodules, "recurse-submodules", false,
@@ -170,16 +172,12 @@ func createSourceGitCmdRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("git URL scheme '%s' not supported, can be: ssh, http and https", u.Scheme)
 	}
 
-	if sourceGitArgs.branch == "" && sourceGitArgs.tag == "" && sourceGitArgs.semver == "" {
-		return fmt.Errorf("a Git ref is required, use one of the following: --branch, --tag or --tag-semver")
+	if sourceGitArgs.branch == "" && sourceGitArgs.tag == "" && sourceGitArgs.semver == "" && sourceGitArgs.commit == "" && sourceGitArgs.refName == "" {
+		return fmt.Errorf("a Git ref is required, use one of the following: --branch, --tag, --commit, --ref-name or --tag-semver")
 	}
 
 	if sourceGitArgs.caFile != "" && u.Scheme == "ssh" {
 		return fmt.Errorf("specifying a CA file is not supported for Git over SSH")
-	}
-
-	if sourceGitArgs.recurseSubmodules && sourceGitArgs.gitImplementation == sourcev1.LibGit2Implementation {
-		return fmt.Errorf("recurse submodules requires --git-implementation=%s", sourcev1.GoGitImplementation)
 	}
 
 	tmpDir, err := os.MkdirTemp("", name)
@@ -220,11 +218,12 @@ func createSourceGitCmdRun(cmd *cobra.Command, args []string) error {
 		gitRepository.Spec.Timeout = &metav1.Duration{Duration: createSourceArgs.fetchTimeout}
 	}
 
-	if sourceGitArgs.gitImplementation != "" {
-		gitRepository.Spec.GitImplementation = sourceGitArgs.gitImplementation.String()
-	}
-
-	if sourceGitArgs.semver != "" {
+	if sourceGitArgs.commit != "" {
+		gitRepository.Spec.Reference.Commit = sourceGitArgs.commit
+		gitRepository.Spec.Reference.Branch = sourceGitArgs.branch
+	} else if sourceGitArgs.refName != "" {
+		gitRepository.Spec.Reference.Name = sourceGitArgs.refName
+	} else if sourceGitArgs.semver != "" {
 		gitRepository.Spec.Reference.SemVer = sourceGitArgs.semver
 	} else if sourceGitArgs.tag != "" {
 		gitRepository.Spec.Reference.Tag = sourceGitArgs.tag

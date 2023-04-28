@@ -30,17 +30,17 @@ import (
 
 	"github.com/fluxcd/pkg/version"
 
-	"github.com/fluxcd/flux2/internal/utils"
-	"github.com/fluxcd/flux2/pkg/manifestgen"
-	"github.com/fluxcd/flux2/pkg/manifestgen/install"
-	"github.com/fluxcd/flux2/pkg/status"
+	"github.com/fluxcd/flux2/v2/internal/utils"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen/install"
+	"github.com/fluxcd/flux2/v2/pkg/status"
 )
 
 var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Check requirements and installation",
-	Long: `The check command will perform a series of checks to validate that
-the local environment is configured correctly and if the installed components are healthy.`,
+	Long: withPreviewNote(`The check command will perform a series of checks to validate that
+the local environment is configured correctly and if the installed components are healthy.`),
 	Example: `  # Run pre-installation checks
   flux check --pre
 
@@ -242,8 +242,9 @@ func crdsCheck() bool {
 		}
 
 		for _, crd := range list.Items {
-			if len(crd.Status.StoredVersions) > 0 {
-				logger.Successf(crd.Name + "/" + crd.Status.StoredVersions[0])
+			versions := crd.Status.StoredVersions
+			if len(versions) > 0 {
+				logger.Successf(crd.Name + "/" + versions[len(versions)-1])
 			} else {
 				ok = false
 				logger.Failuref("no stored versions for %s", crd.Name)

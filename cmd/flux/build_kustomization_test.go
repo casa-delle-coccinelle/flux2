@@ -63,6 +63,12 @@ func TestBuildKustomization(t *testing.T) {
 			resultFile: "./testdata/build-kustomization/podinfo-with-var-substitution-result.yaml",
 			assertFunc: "assertGoldenTemplateFile",
 		},
+		{
+			name:       "build ignore",
+			args:       "build kustomization podinfo --path ./testdata/build-kustomization/ignore --ignore-paths \"!configmap.yaml,!secret.yaml\"",
+			resultFile: "./testdata/build-kustomization/podinfo-with-ignore-result.yaml",
+			assertFunc: "assertGoldenTemplateFile",
+		},
 	}
 
 	tmpl := map[string]string{
@@ -92,7 +98,7 @@ func TestBuildKustomization(t *testing.T) {
 }
 
 func TestBuildLocalKustomization(t *testing.T) {
-	podinfo := `apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
+	podinfo := `apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
   name: podinfo
@@ -171,8 +177,7 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	defer os.Remove("./testdata/build-kustomization/podinfo.yaml")
+	t.Cleanup(func() { _ = os.Remove("./testdata/build-kustomization/podinfo.yaml") })
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

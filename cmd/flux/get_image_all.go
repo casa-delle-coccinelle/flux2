@@ -22,13 +22,13 @@ import (
 	"github.com/spf13/cobra"
 
 	autov1 "github.com/fluxcd/image-automation-controller/api/v1beta1"
-	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1beta1"
+	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
 )
 
 var getImageAllCmd = &cobra.Command{
 	Use:   "all",
 	Short: "Get all image statuses",
-	Long:  "The get image sub-commands print the statuses of all image objects.",
+	Long:  withPreviewNote("The get image sub-commands print the statuses of all image objects."),
 	Example: `  # List all image objects in a namespace
   flux get images all --namespace=flux-system
 

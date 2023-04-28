@@ -22,14 +22,14 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	notificationv1 "github.com/fluxcd/notification-controller/api/v1beta1"
+	notificationv1 "github.com/fluxcd/notification-controller/api/v1beta2"
 )
 
 var getAlertProviderCmd = &cobra.Command{
 	Use:     "alert-providers",
 	Aliases: []string{"alert-provider"},
 	Short:   "Get Provider statuses",
-	Long:    "The get alert-provider command prints the statuses of the resources.",
+	Long:    withPreviewNote("The get alert-provider command prints the statuses of the resources."),
 	Example: `  # List all Providers and their status
   flux get alert-providers`,
 	ValidArgsFunction: resourceNamesCompletionFunc(notificationv1.GroupVersion.WithKind(notificationv1.ProviderKind)),

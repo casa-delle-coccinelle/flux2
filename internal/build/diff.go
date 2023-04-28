@@ -39,10 +39,10 @@ import (
 	"sigs.k8s.io/cli-utils/pkg/object"
 	"sigs.k8s.io/yaml"
 
+	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
 	"github.com/fluxcd/pkg/ssa"
 
-	"github.com/fluxcd/flux2/pkg/printers"
-	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
+	"github.com/fluxcd/flux2/v2/pkg/printers"
 )
 
 func (b *Builder) Manager() (*ssa.ResourceManager, error) {
@@ -58,12 +58,12 @@ func (b *Builder) Manager() (*ssa.ResourceManager, error) {
 func (b *Builder) Diff() (string, bool, error) {
 	output := strings.Builder{}
 	createdOrDrifted := false
-	res, err := b.Build()
+	objects, err := b.Build()
 	if err != nil {
 		return "", createdOrDrifted, err
 	}
-	// convert the build result into Kubernetes unstructured objects
-	objects, err := ssa.ReadObjects(bytes.NewReader(res))
+
+	err = ssa.SetNativeKindsDefaults(objects)
 	if err != nil {
 		return "", createdOrDrifted, err
 	}
@@ -75,10 +75,6 @@ func (b *Builder) Diff() (string, bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), b.timeout)
 	defer cancel()
-
-	if err := ssa.SetNativeKindsDefaults(objects); err != nil {
-		return "", createdOrDrifted, err
-	}
 
 	if b.spinner != nil {
 		err = b.spinner.Start()
@@ -105,16 +101,16 @@ func (b *Builder) Diff() (string, bool, error) {
 
 		// if the object is a sops secret, we need to
 		// make sure we diff only if the keys are different
-		if obj.GetKind() == "Secret" && change.Action == string(ssa.ConfiguredAction) {
+		if obj.GetKind() == "Secret" && change.Action == ssa.ConfiguredAction {
 			diffSopsSecret(obj, liveObject, mergedObject, change)
 		}
 
-		if change.Action == string(ssa.CreatedAction) {
+		if change.Action == ssa.CreatedAction {
 			output.WriteString(writeString(fmt.Sprintf("► %s created\n", change.Subject), bunt.Green))
 			createdOrDrifted = true
 		}
 
-		if change.Action == string(ssa.ConfiguredAction) {
+		if change.Action == ssa.ConfiguredAction {
 			output.WriteString(bunt.Sprint(fmt.Sprintf("► %s drifted\n", change.Subject)))
 			liveFile, mergedFile, tmpDir, err := writeYamls(liveObject, mergedObject)
 			if err != nil {
@@ -232,10 +228,10 @@ func applySopsDiff(data map[string]interface{}, liveObject, mergedObject *unstru
 
 		if bytes.Contains(v, []byte(mask)) {
 			if liveObject != nil && mergedObject != nil {
-				change.Action = string(ssa.UnchangedAction)
+				change.Action = ssa.UnchangedAction
 				liveKeys, mergedKeys := sopsComparableByKeys(liveObject), sopsComparableByKeys(mergedObject)
 				if cmp.Diff(liveKeys, mergedKeys) != "" {
-					change.Action = string(ssa.ConfiguredAction)
+					change.Action = ssa.ConfiguredAction
 				}
 			}
 		}

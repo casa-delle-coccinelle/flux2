@@ -25,12 +25,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
+
+	"github.com/fluxcd/flux2/v2/internal/utils"
 )
 
 var getSourceHelmCmd = &cobra.Command{
 	Use:   "helm",
 	Short: "Get HelmRepository source statuses",
-	Long:  "The get sources helm command prints the status of the HelmRepository sources.",
+	Long:  withPreviewNote("The get sources helm command prints the status of the HelmRepository sources."),
 	Example: `  # List all Helm repositories and their status
   flux get sources helm
 
@@ -80,6 +82,8 @@ func (a *helmRepositoryListAdapter) summariseItem(i int, includeNamespace bool, 
 		revision = item.GetArtifact().Revision
 	}
 	status, msg := statusAndMessage(item.Status.Conditions)
+	revision = utils.TruncateHex(revision)
+	msg = utils.TruncateHex(msg)
 	return append(nameColumns(&item, includeNamespace, includeKind),
 		revision, strings.Title(strconv.FormatBool(item.Spec.Suspend)), status, msg)
 }

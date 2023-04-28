@@ -33,7 +33,7 @@ import (
 
 	"github.com/fluxcd/pkg/ssh"
 
-	"github.com/fluxcd/flux2/pkg/manifestgen"
+	"github.com/fluxcd/flux2/v2/pkg/manifestgen"
 )
 
 const defaultSSHPort = 22
@@ -151,6 +151,9 @@ func buildSecret(keypair *ssh.KeyPair, hostKey, caFile, certFile, keyFile, docke
 	if options.Username != "" && options.Password != "" {
 		secret.StringData[UsernameSecretKey] = options.Username
 		secret.StringData[PasswordSecretKey] = options.Password
+	}
+	if options.BearerToken != "" {
+		secret.StringData[BearerTokenKey] = options.BearerToken
 	}
 
 	if len(caFile) != 0 {
