@@ -35,11 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	extgogit "github.com/fluxcd/go-git/v5"
-	gitconfig "github.com/fluxcd/go-git/v5/config"
-	"github.com/fluxcd/go-git/v5/plumbing"
-	"github.com/fluxcd/go-git/v5/plumbing/object"
-	"github.com/fluxcd/go-git/v5/plumbing/transport/http"
 	helmv2beta1 "github.com/fluxcd/helm-controller/api/v2beta1"
 	automationv1beta1 "github.com/fluxcd/image-automation-controller/api/v1beta1"
 	reflectorv1beta2 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
@@ -52,6 +47,11 @@ import (
 	"github.com/fluxcd/pkg/git/repository"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	sourcev1b2 "github.com/fluxcd/source-controller/api/v1beta2"
+	extgogit "github.com/go-git/go-git/v5"
+	gitconfig "github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
 const defaultBranch = "main"
@@ -182,7 +182,7 @@ patchesStrategicMerge:
 	files["clusters/e2e/flux-system/gotk-sync.yaml"] = strings.NewReader("")
 	err = commitAndPushAll(repo, files, defaultBranch)
 	if err != nil {
-		return fmt.Errorf("error commiting and pushing manifests: %w", err)
+		return fmt.Errorf("error committing and pushing manifests: %w", err)
 	}
 
 	bootstrapCmd := fmt.Sprintf("flux bootstrap git  --url=%s --password=%s --kubeconfig=%s"+
@@ -313,11 +313,14 @@ func getRepository(repoURL, branchName string, overrideBranch bool, password str
 		return nil, "", err
 	}
 
-	_, err = c.Clone(context.Background(), repoURL, repository.CloneOptions{
+	_, err = c.Clone(context.Background(), repoURL, repository.CloneConfig{
 		CheckoutStrategy: repository.CheckoutStrategy{
 			Branch: checkoutBranch,
 		},
 	})
+	if err != nil {
+		return nil, "", err
+	}
 
 	err = c.SwitchBranch(context.Background(), branchName)
 	if err != nil {
@@ -368,7 +371,7 @@ func commitAndPushAll(client *gogit.Client, files map[string]io.Reader, branchNa
 		return err
 	}
 
-	err = client.Push(context.Background())
+	err = client.Push(context.Background(), repository.PushConfig{})
 	if err != nil {
 		return err
 	}

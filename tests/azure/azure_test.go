@@ -44,11 +44,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2/klogr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	runtimeLog "sigs.k8s.io/controller-runtime/pkg/log"
 
-	extgogit "github.com/fluxcd/go-git/v5"
-	"github.com/fluxcd/go-git/v5/plumbing"
 	automationv1beta1 "github.com/fluxcd/image-automation-controller/api/v1beta1"
 	reflectorv1beta2 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
 	kustomizev1 "github.com/fluxcd/kustomize-controller/api/v1"
@@ -57,6 +57,8 @@ import (
 	eventv1 "github.com/fluxcd/pkg/apis/event/v1beta1"
 	"github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	extgogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 const (
@@ -111,7 +113,7 @@ func TestMain(m *testing.M) {
 
 func setup(m *testing.M) (exitVal int, err error) {
 	ctx := context.TODO()
-
+	runtimeLog.SetLogger(klogr.New())
 	// Setup Terraform binary and init state
 	log.Println("Setting up Azure test infrastructure")
 	i := install.NewInstaller()
@@ -842,6 +844,7 @@ func TestEventHubNotification(t *testing.T) {
 					Namespace: name,
 				},
 			},
+			Summary: "cluster: test-1",
 		}
 		return nil
 	})

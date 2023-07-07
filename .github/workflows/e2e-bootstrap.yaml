@@ -3,9 +3,10 @@ name: e2e-bootstrap
 on:
   workflow_dispatch:
   push:
-    branches: [ main, release-* ]
+    branches: [ 'main', 'release/**' ]
   pull_request:
-    branches: [ main, release-* ]
+    branches: [ 'main', 'release/**' ]
+    paths-ignore: [ 'docs/**', 'rfcs/**' ]
 
 permissions:
   contents: read
@@ -16,23 +17,23 @@ jobs:
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout
-        uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab # v3.5.2
+        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
       - name: Setup Go
-        uses: actions/setup-go@4d34df0c2316fe8122ab82dc22947d607c0c91f9 # v4.0.0
+        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
         with:
           go-version: 1.20.x
           cache-dependency-path: |
             **/go.sum
             **/go.mod
       - name: Setup Kubernetes
-        uses: helm/kind-action@d8ccf8fb623ce1bb360ae2f45f323d9d5c5e9f00 # v1.5.0
+        uses: helm/kind-action@fa81e57adff234b2908110485695db0f181f3c67 # v1.7.0
         with:
-          version: v0.17.0
+          version: v0.20.0
           cluster_name: kind
           # The versions below should target the newest Kubernetes version
           # Keep this up-to-date with https://endoflife.date/kubernetes
-          node_image: kindest/node:v1.26.0
-          kubectl_version: v1.26.2
+          node_image: kindest/node:v1.27.3@sha256:3966ac761ae0136263ffdb6cfd4db23ef8a83cba8a463690e98317add2c9ba72
+          kubectl_version: v1.27.3
       - name: Setup Kustomize
         uses: fluxcd/pkg/actions/kustomize@main
       - name: Build
@@ -98,7 +99,6 @@ jobs:
           --path=test-cluster \
           --read-write-key
           /tmp/flux reconcile image repository podinfo
-          /tmp/flux reconcile image update flux-system
           /tmp/flux get images all
           
           retries=10

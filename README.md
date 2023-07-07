@@ -2,6 +2,7 @@
 
 [![release](https://img.shields.io/github/release/fluxcd/flux2/all.svg)](https://github.com/fluxcd/flux2/releases)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/4782/badge)](https://bestpractices.coreinfrastructure.org/projects/4782)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/fluxcd/flux2/badge)](https://api.securityscorecards.dev/projects/github.com/fluxcd/flux2)
 [![FOSSA Status](https://app.fossa.com/api/projects/custom%2B162%2Fgithub.com%2Ffluxcd%2Fflux2.svg?type=shield)](https://app.fossa.com/projects/custom%2B162%2Fgithub.com%2Ffluxcd%2Fflux2?ref=badge_shield)
 [![Artifact HUB](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/flux2)](https://artifacthub.io/packages/helm/fluxcd-community/flux2)
 
@@ -42,7 +43,7 @@ runtime for Flux v2. The APIs comprise Kubernetes custom resources,
 which can be created and updated by a cluster user, or by other
 automation tooling.
 
-![overview](docs/_files/gitops-toolkit.png)
+![overview](https://fluxcd.io/img/diagrams/gitops-toolkit.png)
 
 You can use the toolkit to extend Flux, or to build your own systems
 for continuous delivery -- see [the developer
